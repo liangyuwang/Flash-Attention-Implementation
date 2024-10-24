@@ -98,6 +98,10 @@ def flashattn_backward(
     # add scale
     scale = scale if scale is not None else dim ** -0.5
 
+    # add mask
+    if if_causal and mask is None:
+        causal_mask = torch.tril(torch.ones((N,N), device=Query.device, dtype=Query.dtype))
+    
     for b in range(BS):
         for h in range(n_qhead):
             Q, K, V = Query[b,h,:,:], Key[b,h,:,:], Value[b,h,:,:]
@@ -136,6 +140,17 @@ def flashattn_backward(
                     
                     # add scale
                     Sij.mul_(scale)
+
+                    # add mask
+                    if if_causal:
+                        causal_mask_ij = causal_mask[i*Br:(i+1)*Br, j*Bc:(j+1)*Bc]
+                        if mask is None:
+                            Sij = Sij.masked_fill(causal_mask_ij==0, float('-inf'))
+                        else:
+                            raise NotImplementedError
+                    if mask is not None and not if_causal:
+                        mask_ij = mask[i*Br:(i+1)*Br, j*Bc:(j+1)*Bc]
+                        Sij = Sij.masked_fill(mask_ij==0, float('-inf'))
 
                     Pij = torch.exp(Sij - Li.unsqueeze(-1))
                     dVj.add_(torch.matmul(Pij.transpose(0,1), dOi))
@@ -184,7 +199,7 @@ def eval_acc():
     torch.manual_seed(0)
     BS, dim, heads, seq_len = 2, 4096, 8, 1024
     Br, Bc = 32, 64
-    if_causal = False
+    if_causal = True
     df = torch.float64
     # Test input
     q = torch.randn(BS, heads, seq_len, dim, requires_grad=True).to(df).cuda()

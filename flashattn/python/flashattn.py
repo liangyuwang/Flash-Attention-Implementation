@@ -4,7 +4,7 @@ import torch
 from torch.cuda import memory_allocated
 
 # This script implement flash attention v2 with python code. 
-# Not fast but can help understanding.
+# Not fast and memory efficient but can help understanding.
 
 
 def flashattn_forward(
@@ -293,13 +293,13 @@ def eval_memory():
     dOut = torch.randn_like(q)
     
     flash_peak_memory, flash_memory_used, (out_flash, logsumexp) = _calculate_memory(flashattn_forward, q, k, v, Br, Bc, if_causal=if_causal)
-    standard_peak_memory, standard_memory_used, (out_standard, _) = _calculate_memory(flashattn_forward, q, k, v, Br, Bc, if_causal=if_causal)
+    standard_peak_memory, standard_memory_used, (out_standard, _) = _calculate_memory(attention, q, k, v, if_causal=if_causal)
     print(f'flash-attn fwd / standard-attn fwd memory usage: {flash_peak_memory / standard_peak_memory:.4f}')
     
-    # # flash-attn backward
-    # flash_peak_memory, flash_memory_used, _ = _calculate_memory(flashattn_backward, dOut, q, k, v, out_flash, logsumexp, Br, Bc, if_causal=if_causal)
-    # standard_peak_memory, standard_memory_used, _ = _calculate_memory(torch.autograd.grad, outputs=out_standard, inputs=[q, k, v], grad_outputs=dOut, create_graph=False)
-    # print(f'flash-attn bwd / standard-attn bwd memory usage: {flash_peak_memory / standard_peak_memory:.4f}')
+    # flash-attn backward
+    flash_peak_memory, flash_memory_used, _ = _calculate_memory(flashattn_backward, dOut, q, k, v, out_flash, logsumexp, Br, Bc, if_causal=if_causal)
+    standard_peak_memory, standard_memory_used, _ = _calculate_memory(torch.autograd.grad, outputs=out_standard, inputs=[q, k, v], grad_outputs=dOut, create_graph=False)
+    print(f'flash-attn bwd / standard-attn bwd memory usage: {flash_peak_memory / standard_peak_memory:.4f}')
 
 
 if __name__=="__main__":

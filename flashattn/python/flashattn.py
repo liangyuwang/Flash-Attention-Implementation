@@ -174,12 +174,10 @@ def attention(query, key, value, scale=None, mask=None, if_causal=True):
     scale = scale if scale is not None else key.shape[-1] ** -0.5
     attention_scores = attention_scores * scale
     
-    if if_causal:
+    if if_causal and mask is None:
         causal_mask = torch.tril(torch.ones(attention_scores.shape[-2:], device=attention_scores.device))
-        if mask is None:
-            attention_scores = attention_scores.masked_fill(causal_mask==0, float('-inf'))
-
-    if mask is not None and not if_causal:
+        attention_scores = attention_scores.masked_fill(causal_mask==0, float('-inf'))
+    if mask is not None:
         attention_scores = attention_scores.masked_fill(mask==0, float('-inf'))
     
     attention_weights = torch.nn.functional.softmax(attention_scores, dim=-1)

@@ -1,4 +1,10 @@
+import time
+from tqdm.auto import tqdm
 import torch
+from torch.cuda import memory_allocated
+
+# This script implement flash attention v2 with python code. 
+# Not fast but can help understanding.
 
 
 def flashattn_forward(
@@ -109,7 +115,6 @@ def flashattn_backward(
 
             Q_Tr_blocks = torch.stack(Q.split(Br, dim=0), dim=0)
             dQ_Tr_blocks = torch.stack(dQ.split(Br, dim=0), dim=0)
-            O_Tr_blocks = torch.stack(O.split(Br, dim=0), dim=0)
             dO_Tr_blocks = torch.stack(dO.split(Br, dim=0), dim=0)
             L_Tr_blocks = torch.stack(L.split(Br), dim=0)
             D_Tr_blocks = torch.stack(D.split(Br), dim=0)
@@ -127,7 +132,6 @@ def flashattn_backward(
 
                 for i in range(Tr):
                     Qi = Q_Tr_blocks[i]
-                    Oi = O_Tr_blocks[i]
                     dOi = dO_Tr_blocks[i]
                     dQi = dQ_Tr_blocks[i]
                     Li = L_Tr_blocks[i]
@@ -192,11 +196,12 @@ def eval_acc():
     BS, dim, heads, seq_len = 2, 4096, 8, 1024
     Br, Bc = 32, 64
     if_causal = True
-    df = torch.float64
+    df = torch.float32
     # Test input
     q = torch.randn(BS, heads, seq_len, dim, requires_grad=True).to(df).cuda()
     k = torch.randn(BS, heads, seq_len, dim, requires_grad=True).to(df).cuda()
     v = torch.randn(BS, heads, seq_len, dim, requires_grad=True).to(df).cuda()
+    dOut = torch.randn_like(q)
 
     # Forward pass
     out_standard, _ = attention(q, k, v, if_causal=if_causal)
@@ -205,8 +210,6 @@ def eval_acc():
     # Calculate absolute differences
     abs_diff = torch.abs(out_standard - out_flash).max().item()
     print(f'Max absolute difference between standard and flash attention forward outputs: {abs_diff:.15f}')
-
-    dOut = torch.randn_like(out_standard)
 
     # Backward pass
     dQ_standard, dK_standard, dV_standard = torch.autograd.grad(outputs=out_standard, inputs=[q, k, v], grad_outputs=dOut, create_graph=True)
@@ -228,6 +231,80 @@ def eval_acc():
     print("Flash attention gradients:")
     print("dQ:", dQ_flash.norm().item(), "dK:", dK_flash.norm().item(), "dV:", dV_flash.norm().item())
 
+def eval_speed():
+    torch.manual_seed(0)
+    def _calculate_time(fn, *args, **kwargs):
+        # Warm-up 
+        for _ in tqdm(range(2)):
+            output = fn(*args, **kwargs)
+        # Timed run
+        start_time = time.time()
+        for _ in range(1):
+            _ = fn(*args, **kwargs)
+        elapsed_time = time.time() - start_time
+        return elapsed_time, output
+
+    BS, dim, heads, seq_len = 1, 1024, 8, 1024
+    Br, Bc = 32, 64
+    if_causal = True
+    df = torch.float32
+    # Test input
+    q = torch.randn(BS, heads, seq_len, dim, requires_grad=True).to(df).cuda()
+    k = torch.randn(BS, heads, seq_len, dim, requires_grad=True).to(df).cuda()
+    v = torch.randn(BS, heads, seq_len, dim, requires_grad=True).to(df).cuda()
+    dOut = torch.randn_like(q)
+
+    # flash-attn forward
+    flash_elapsed_time, (out_flash, logsumexp) = _calculate_time(flashattn_forward, q, k, v, Br, Bc, if_causal=if_causal)
+    torch.cuda.empty_cache()
+    standard_elapsed_time, (out_standard, _) = _calculate_time(attention, q, k, v, if_causal=if_causal)
+    torch.cuda.empty_cache()
+    print(f'flash-attn fwd / standard-attn fwd speed: {standard_elapsed_time/flash_elapsed_time:.4f}')
+
+    # flash-attn backward
+    flash_elapsed_time, _ = _calculate_time(flashattn_backward, dOut, q, k, v, out_flash, logsumexp, Br, Bc, if_causal=if_causal)
+    torch.cuda.empty_cache()
+    standard_elapsed_time, _ = _calculate_time(torch.autograd.grad, outputs=out_standard, inputs=[q, k, v], grad_outputs=dOut, create_graph=True)
+    torch.cuda.empty_cache()
+    print(f'flash-attn bwd / standard-attn bwd speed: {standard_elapsed_time/flash_elapsed_time:.4f}')
+
+def eval_memory():
+    torch.manual_seed(0)
+    def _calculate_memory(fn, *args, **kwargs):
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+
+        memory_before = memory_allocated()
+        output = fn(*args, **kwargs)
+        memory_after = memory_allocated()
+
+        peak_memory = torch.cuda.max_memory_allocated()
+        memory_used = memory_after - memory_before
+        return peak_memory, memory_used, output
+    
+    BS, dim, heads, seq_len = 1, 4096, 8, 1024
+    Br, Bc = 32, 64
+    if_causal = True
+    df = torch.float32
+    # Test input
+    q = torch.randn(BS, heads, seq_len, dim, requires_grad=True).to(df).cuda()
+    k = torch.randn(BS, heads, seq_len, dim, requires_grad=True).to(df).cuda()
+    v = torch.randn(BS, heads, seq_len, dim, requires_grad=True).to(df).cuda()
+    dOut = torch.randn_like(q)
+    
+    flash_peak_memory, flash_memory_used, (out_flash, logsumexp) = _calculate_memory(flashattn_forward, q, k, v, Br, Bc, if_causal=if_causal)
+    standard_peak_memory, standard_memory_used, (out_standard, _) = _calculate_memory(flashattn_forward, q, k, v, Br, Bc, if_causal=if_causal)
+    print(f'flash-attn fwd / standard-attn fwd memory usage: {flash_peak_memory / standard_peak_memory:.4f}')
+    
+    # # flash-attn backward
+    # flash_peak_memory, flash_memory_used, _ = _calculate_memory(flashattn_backward, dOut, q, k, v, out_flash, logsumexp, Br, Bc, if_causal=if_causal)
+    # standard_peak_memory, standard_memory_used, _ = _calculate_memory(torch.autograd.grad, outputs=out_standard, inputs=[q, k, v], grad_outputs=dOut, create_graph=False)
+    # print(f'flash-attn bwd / standard-attn bwd memory usage: {flash_peak_memory / standard_peak_memory:.4f}')
+
 
 if __name__=="__main__":
+    eval_memory()
+    torch.cuda.empty_cache()
     eval_acc()
+    torch.cuda.empty_cache()
+    eval_speed()

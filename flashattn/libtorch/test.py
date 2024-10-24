@@ -7,7 +7,7 @@ from torch.utils.cpp_extension import load
 # Compiling and loading the C++ module
 flashattn = load(
     name='flashattn',
-    sources=['flashattn/libtorch/flashattn.cpp'],
+    sources=['./flashattn.cpp'],
     extra_cflags=['-O2'],
     verbose=True
 )

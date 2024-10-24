@@ -6,11 +6,13 @@ Implementation of Flash-Attention (both forward and backward) with PyTorch, LibT
 
 * PyTorch
   ```shell
-  python flashattn/python/flashattn.py
+  cd flashattn/pytorch
+  python flashattn.py
   ```
 * LibTorch
   ```shell
-  python flashattn/libtorch/test.py
+  cd flashattn/libtorch
+  python test.py
   ```
 * CUDA
   - [ ] TODO

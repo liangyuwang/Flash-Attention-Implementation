@@ -50,13 +50,10 @@ def flashattn_forward(
                     Sij.mul_(scale)
 
                     # add mask
-                    if if_causal:
+                    if if_causal and mask is None:
                         causal_mask_ij = causal_mask[i*Br:(i+1)*Br, j*Bc:(j+1)*Bc]
-                        if mask is None:
-                            Sij = Sij.masked_fill(causal_mask_ij==0, float('-inf'))
-                        else:
-                            raise NotImplementedError
-                    if mask is not None and not if_causal:
+                        Sij = Sij.masked_fill(causal_mask_ij==0, float('-inf'))
+                    if mask is not None:
                         mask_ij = mask[i*Br:(i+1)*Br, j*Bc:(j+1)*Bc]
                         Sij = Sij.masked_fill(mask_ij==0, float('-inf'))
 
@@ -142,13 +139,10 @@ def flashattn_backward(
                     Sij.mul_(scale)
 
                     # add mask
-                    if if_causal:
+                    if if_causal and mask is None:
                         causal_mask_ij = causal_mask[i*Br:(i+1)*Br, j*Bc:(j+1)*Bc]
-                        if mask is None:
-                            Sij = Sij.masked_fill(causal_mask_ij==0, float('-inf'))
-                        else:
-                            raise NotImplementedError
-                    if mask is not None and not if_causal:
+                        Sij = Sij.masked_fill(causal_mask_ij==0, float('-inf'))
+                    if mask is not None:
                         mask_ij = mask[i*Br:(i+1)*Br, j*Bc:(j+1)*Bc]
                         Sij = Sij.masked_fill(mask_ij==0, float('-inf'))
 
